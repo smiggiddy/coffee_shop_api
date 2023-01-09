@@ -1,6 +1,7 @@
 import datetime as dt
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import JWTManager, jwt_required, create_access_token
+from json.decoder import JSONDecodeError
 from werkzeug.security import generate_password_hash, check_password_hash
 from .models import Products, OrderItems, Orders, Users
 from .schemas import order_schema,orders_schema,product_schema,products_schema, users_schema
@@ -9,6 +10,14 @@ from .helpers import *
 
 
 api_views = Blueprint('api_views', __name__)
+
+## adding API response for invalid API requests
+@api_views.app_errorhandler(404)
+def invalid_requests(err):
+
+    return jsonify(error='Invalid API request'), 404
+
+
 
 ###### PRODUCTS ######
 @api_views.route("/product-management")
@@ -93,16 +102,23 @@ def edit_product(product_id):
     db_commit_needed = False
     product = Products.query.filter_by(id=product_id).first()
 
-    if product:
+    if product and request.is_json:
         if request.is_json:
-            prod_data = request.get_json()
+            try:
+                prod_data = request.get_json()
+            except JSONDecodeError:
+                return jsonify(error='invalid JSON request'), 400
+
         else: 
             prod_data = request.get_data()
 
-        new_product_name = prod_data.get('product_name', product.product_name)
-        new_price = prod_data.get('price', product.price)
-        new_size = prod_data.get('size', product.size)
-        new_qty = prod_data.get('qty', product.stock_quanity)
+        try: 
+            new_product_name = prod_data.get('product_name', product.product_name)
+            new_price = prod_data.get('price', product.price)
+            new_size = prod_data.get('size', product.size)
+            new_qty = prod_data.get('qty', product.qty)
+        except AttributeError:
+                return jsonify(error='invalid data'), 400
 
         # checking to avoid dup size/prod names
         condition_one = new_product_name != product.product_name or new_size != product.size 
@@ -117,7 +133,7 @@ def edit_product(product_id):
                 return jsonify(error="error updating product name or size already exists!"), 409
 
 
-        condition_two = new_price != product.price or new_qty != product.stock_quanity
+        condition_two = new_price != product.price or new_qty != product.qty
 
         if condition_two:
             product.price = new_price
@@ -163,7 +179,7 @@ def get_orders():
     orders_list = Orders.query.all()
     orders_data = orders_schema.dump(orders_list)
 
-    return jsonify(data=orders_data)
+    return jsonify(data=orders_data), 200
 
 
 @api_views.route('/order-management', methods=['POST'])
@@ -211,7 +227,7 @@ def orders():
         order.order_total = order_total    
         db.session.commit()
 
-        return jsonify({order_name: {'order_items': list_order_items}}), 201
+        return jsonify(message={order_name: {'order_items': list_order_items}}), 201
 
     except Exception as e:
         print(e)
